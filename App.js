@@ -5,9 +5,7 @@ import {
   Button,
   PermissionsAndroid,
   StyleSheet,
-  Alert,
   TouchableWithoutFeedback,
-  TouchableOpacity,
   Pressable,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
@@ -15,15 +13,15 @@ import RNFetchBlob from 'react-native-fetch-blob';
 import storage from '@react-native-firebase/storage';
 import firestore from '@react-native-firebase/firestore';
 import Feather from 'react-native-vector-icons/Feather';
-import Ionicons from 'react-native-vector-icons/Ionicons';
-
-import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import AntDesign from 'react-native-vector-icons/AntDesign';
-
 import AudioRecorderPlayer from 'react-native-audio-recorder-player';
+
 const audioRecorderPlayer = new AudioRecorderPlayer();
+
 const App = () => {
   const [allData, setAllData] = useState([]);
+  const [currentPlayingIndex, setCurrentPlayingIndex] = useState(-1);
+
   const permissions = async () => {
     if (Platform.OS === 'android') {
       try {
@@ -52,39 +50,59 @@ const App = () => {
     }
   };
 
-  console.log();
   useEffect(() => {
     permissions();
     const subscriber = firestore()
       .collection('chat')
       .onSnapshot(documentSnapshot => {
-        // console.log('User data: ', documentSnapshot.data());
         const data = documentSnapshot.docs.map(data => data.data());
         setAllData(data);
-        console.log('agsdau', data);
       });
 
-    // Stop listening for updates when no longer required
     return () => subscriber();
   }, []);
+
+  const handlePlayPause = index => {
+    if (currentPlayingIndex === index) {
+      // The same sound is playing, so we want to pause it
+      audioRecorderPlayer.pausePlayer();
+      setCurrentPlayingIndex(-1); // No sound is currently playing
+    } else {
+      // A different sound should play
+      if (currentPlayingIndex !== -1) {
+        // Stop the previously playing sound if any
+        audioRecorderPlayer.stopPlayer();
+      }
+      const sound = allData[index].sound;
+      audioRecorderPlayer.startPlayer(sound);
+      setCurrentPlayingIndex(index);
+    }
+  };
 
   return (
     <View style={styles.container}>
       {allData.length !== 0 &&
         allData.map((data, index) => {
-          return <Player key={index} data={data} />;
+          return (
+            <Player
+              key={index}
+              data={data}
+              isPlaying={index === currentPlayingIndex}
+              onPlay={() => handlePlayPause(index)}
+            />
+          );
         })}
       <Recorder />
     </View>
   );
 };
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'flex-end',
   },
 });
-export default App;
 
 const Recorder = () => {
   const [isRecording, setRecording] = useState(false);
@@ -172,21 +190,29 @@ const Recorder = () => {
   );
 };
 
-const Player = ({data}) => {
-  const [isPlaying, setPlaying] = useState(false);
+const Player = ({data, isPlaying, onPlay}) => {
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
+  const [isSoundCompleted, setIsSoundCompleted] = useState(false);
 
-  if (startTime !== 0 && startTime === endTime) {
-    audioRecorderPlayer.stopPlayer();
-    setStartTime(0);
-    setPlaying(false);
-  }
+  useEffect(() => {
+    if (isPlaying) {
+      startPlayback(data.sound);
+    } else {
+      stopPlayback();
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (isSoundCompleted) {
+      setStartTime(0);
+    }
+  }, [isSoundCompleted]);
+
   const startPlayback = async sound => {
-    setPlaying(true);
+    setIsSoundCompleted(false);
     await audioRecorderPlayer.startPlayer(sound);
     audioRecorderPlayer.addPlayBackListener(e => {
-      // audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)).split(':')[1],
       setStartTime(
         Number(
           audioRecorderPlayer
@@ -199,50 +225,43 @@ const Player = ({data}) => {
           audioRecorderPlayer.mmssss(Math.floor(e.duration)).split(':')[1],
         ),
       );
-      console.log(
-        audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)).split(':')[1],
-        audioRecorderPlayer.mmssss(Math.floor(e.duration)).split(':')[1],
-      );
-      // setPlayingTime (
-      //   audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)).split(':')[1],
-      // );
+      if (e.currentPosition >= e.duration) {
+        // Playback completed, set isSoundCompleted to true
+        setIsSoundCompleted(true);
+      }
     });
-    console.log('running path');
-    // await audioRecorderPlayer.startPlayer(path);
-    // setPlaying(true);
   };
 
   const stopPlayback = async () => {
-    await audioRecorderPlayer.stopPlayer();
-    setPlaying(false);
+    setIsSoundCompleted(false);
+    audioRecorderPlayer.stopPlayer();
   };
 
   return (
-    <View>
-      {/* <Text>{playingTime}</Text> */}
-      <View style={{flexDirection: 'row'}}>
-        <TouchableWithoutFeedback
-          onPress={
-            isPlaying
-              ? () => stopPlayback(data.sound)
-              : () => startPlayback(data.sound)
-          }>
-          {isPlaying ? (
-            <AntDesign name="pause" size={30} color="#000" />
-          ) : (
-            <Feather name="play" size={30} color="#000" />
-          )}
-        </TouchableWithoutFeedback>
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: '#456464',
+        marginVertical: 10,
+      }}>
+      <TouchableWithoutFeedback onPress={onPlay}>
+        {isPlaying && !isSoundCompleted ? (
+          <AntDesign name="pause" size={30} color="#000" />
+        ) : (
+          <Feather name="play" size={30} color="#000" />
+        )}
+      </TouchableWithoutFeedback>
 
-        <Slider
-          style={{width: 200, height: 40}}
-          value={startTime}
-          minimumValue={0}
-          maximumValue={endTime}
-          minimumTrackTintColor="#57345734"
-          maximumTrackTintColor="#000000"
-        />
-      </View>
+      <Slider
+        style={{width: 200, height: 40}}
+        value={isSoundCompleted ? 0 : startTime}
+        minimumValue={0}
+        maximumValue={endTime}
+        minimumTrackTintColor="#57345734"
+        maximumTrackTintColor="#000000"
+      />
     </View>
   );
 };
+
+export default App;
